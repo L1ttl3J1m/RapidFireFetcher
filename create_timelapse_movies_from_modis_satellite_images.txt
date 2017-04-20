@@ -1,0 +1,91 @@
+#!/bin/bash
+
+
+#########################################################################
+#									#
+#	This script performs the following actions;			#
+#	- Retrieves a series of Zip files from a website		#
+#	- Extracts an image file from the Zip file			#
+#	- Prints a date in one corner of the image			#
+#	- Selects an area of interest from the image			#
+#	- Calulates the amount of cloud cover in the image		#
+#	- Produces an animation of all images				#
+#	  with less than %30 percent cloud cover			#
+#									#
+#	An example of the final result can be seen at 			#
+#	https://www.youtube.com/watch?v=tvYXzUOsnlI			#
+#									#
+#########################################################################
+
+#         Zero All the Variables!
+DIRSTR=.        #          Is the directory the script runs in
+STAMPY=0000000  #          Date stamp for the images in julian
+IMAGE=" "       #          Name of our images
+CENTAGE=0	#          Used for holding percentage of white on images
+
+
+for (( STAMPY=2013001; STAMPY<=2013010; STAMPY++ )) 		# Ends on line 71
+
+do
+
+echo $STAMPY							# Fetch the image
+
+curl -m 120 http://rapidfire.sci.gsfc.nasa.gov/subsets/?subset=AERONET_Birdsville.$STAMPY.aqua.250m.zip -o $DIRSTR/$STAMPY.zip  
+
+# Images are stored on the Rapidfire server as zip files with the format AERONET_<Subset>.YYDDD.<Satellite>.<Instrument>.<Resolution>.zip
+# See http://rapidfire.sci.gsfc.nasa.gov/subsets/index.php?subset=AERONET_Birdsville       
+# or http://rapidfire.sci.gsfc.nasa.gov/subsets/index.php?subset=AERONET_Tinga_Tingana for more datasets
+
+unzip $STAMPY'.zip' \*.jpg 					# Extract the image from the zip file 
+rm $STAMPY.zip  						# Remove the zip file
+
+IMAGE=AERONET_Birdsville.$STAMPY.aqua.250m.jpg         		# Set $IMAGE to the filename
+
+								# Print Datestamp in lower left corner
+								
+convert $IMAGE -gravity southwest -stroke '#000C' -pointsize 50 -strokewidth 2 -annotate 0 `echo $IMAGE | cut -c 20-26` -stroke 'blue' -pointsize 48 -strokewidth 2 -annotate 0 `echo $IMAGE | cut -c 20-26` new_$IMAGE
+                #
+		# Change gravity if you want the datestamp to appear in a different location
+               	# (southwest,southeast,northeast,northwest - see man convert for more)
+               
+rm $IMAGE      # delete the original image
+
+#########################################################################
+#									#
+#	Next line crops the image to the Lake Eyre area			#
+#									#
+#     Do this before you calculate white area, because coverage will  	#
+#     vary depending on what area you are focussing on.			#
+#									#
+#    Change the values of the -crop section to your preference		#
+#    Or, swap commented lines to use whole swathe			#
+#   N.B. Add -vf scale to mencoder command on line 75 if you do this 	#
+#########################################################################
+
+# mv new_$image $image							# Move new_$IMAGE back to $IMAGE for the rest of the script
+  convert new_$IMAGE -crop 1920x1200+0+1680 -sharpen 25 $IMAGE 		# Create new image from cropped section
+
+CENTAGE=`convert $IMAGE -colorspace gray -format "%[fx:100*mean]" info:`   # Calculate the amount of white in the image
+
+echo $CENTAGE "percent of "$IMAGE" is obscured" 
+
+CENTAGE=$( printf "%.0f" $CENTAGE )				#  Reduce to integer and test if the amount of white is less than %30
+
+if [ $CENTAGE -lt 30 ]; then  echo $IMAGE >> list.txt   	# If the amount of white is less than 30, add the name of this image to the list of images to be included in the movie
+
+else
+
+echo "Not that one!"
+
+fi								# End of IF from line 62
+
+echo "Sleeping..."						# Short delay before we begin again (It's the polite thing to do)
+
+sleep 10 
+
+done								# End of FOR-DO loop from line 16
+
+mencoder mf://@list.txt -noskip -ovc lavc -lavcopts vpass=1:vbitrate=4192:vcodec=mjpeg:keyint=1:vb_strategy=1:bidir_refine=4:vqcomp=0.7:subcmp=2:last_pred=4:preme=2:aic:turbo -fps 15 -nosound -o Output.avi
+
+# Add -vf scale=1440:960 between -noskip and -ovc if you commented out the crop convert at line 52
+
